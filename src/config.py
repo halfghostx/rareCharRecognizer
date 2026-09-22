@@ -4,13 +4,28 @@
 生僻字识别项目配置文件
 """
 
+# config.py 顶部
 import os
+import sys
+
+
+def _get_project_root():
+    """获取项目根目录（兼容打包和开发两种模式）。"""
+    if getattr(sys, "frozen", False):
+        # 打包后：exe 所在目录
+        return os.path.dirname(sys.executable)
+    else:
+        # 开发时：config.py 的上一级
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+BASE_DIR = _get_project_root()
 
 # ============================================================
 # 路径配置
 # ============================================================
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 FONT_DIR = os.path.join(BASE_DIR, "data", "fonts")
 

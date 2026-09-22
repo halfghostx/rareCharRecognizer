@@ -1,51 +1,68 @@
 # app.py
 # -*- coding: utf-8 -*-
 """
-生僻字识别 Web 应用。
-启动: python app.py
-访问: http://127.0.0.1:5000
+生僻字识别桌面应用。
+双击 exe 后启动 Flask，自动打开浏览器。
 """
 
 import os
-import io
 import sys
+import io
+import threading
+import webbrowser
 import numpy as np
 import cv2
 from flask import Flask, request, jsonify, send_from_directory, send_file
 from PIL import Image, ImageDraw, ImageFont
 
-sys.path.insert(0, ".")
-sys.path.insert(0, "src")
+
+def get_base_path():
+    """获取资源根路径（打包后 vs 开发时）。"""
+    if getattr(sys, "frozen", False):
+        # PyInstaller 打包后
+        return sys._MEIPASS
+    else:
+        # 开发时，项目根目录
+        return os.path.dirname(os.path.abspath(__file__))
+
+
+BASE_PATH = get_base_path()
+
+# 让 config 和 matcher 能被正确导入
+sys.path.insert(0, BASE_PATH)
+sys.path.insert(0, os.path.join(BASE_PATH, "src"))
+
 import config
 from matcher import load_templates, preprocess_query, recognize
 
-app = Flask(__name__, static_folder="static")
 
 # ============================================================
-# 启动时预热
+# Flask 应用
 # ============================================================
+
+# static 文件夹打包后位置会变，用绝对路径
+static_dir = os.path.join(BASE_PATH, "static")
+app = Flask(__name__, static_folder=static_dir)
+
 
 print("[启动] 加载模板库...")
 load_templates()
 print("[启动] 就绪")
 
-# ============================================================
-# 字形渲染（用于前端展示候选）
-# ============================================================
 
 _render_font = None
 
 
 def get_render_font_path():
-    """优先找 P0 字体文件用于渲染字形。"""
-    if not os.path.isdir(config.FONT_DIR):
+    """找 P0 字体文件用于渲染候选字形。"""
+    font_dir = config.FONT_DIR
+    if not os.path.isdir(font_dir):
         return None
     candidates = []
-    for f in sorted(os.listdir(config.FONT_DIR)):
+    for f in sorted(os.listdir(font_dir)):
         if not f.lower().endswith((".ttf", ".otf")):
             continue
-        path = os.path.join(config.FONT_DIR, f)
-        # P0 优先
+        path = os.path.join(font_dir, f)
         if "P0" in f.upper():
             return path
         candidates.append(path)
@@ -63,7 +80,6 @@ def get_render_font(size=128):
 
 
 def render_glyph_png(cp, size=128):
-    """用天珩字库渲染单字为 PNG，返回 BytesIO 或 None。"""
     font = get_render_font(size)
     if font is None:
         return None
@@ -86,18 +102,13 @@ def render_glyph_png(cp, size=128):
     return buf
 
 
-# ============================================================
-# 路由
-# ============================================================
-
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory(static_dir, "index.html")
 
 
 @app.route("/glyph/<cp_hex>")
 def glyph(cp_hex):
-    """返回码点对应字形的 PNG。"""
     try:
         cp = int(cp_hex, 16)
     except ValueError:
@@ -110,7 +121,6 @@ def glyph(cp_hex):
 
 @app.route("/recognize", methods=["POST"])
 def api_recognize():
-    """接收上传图片，返回 Top-20 候选。"""
     file = request.files.get("image")
     if not file:
         return jsonify({"error": "未收到图片"}), 400
@@ -134,6 +144,21 @@ def api_recognize():
     return jsonify({"results": results})
 
 
+def open_browser():
+    """延迟 1.5 秒打开浏览器，给 Flask 启动留时间。"""
+    import time
+    time.sleep(1.5)
+    webbrowser.open("http://127.0.0.1:5000")
+
+
 if __name__ == "__main__":
+    # 打包后不打印 Werkzeug 启动日志
+    import logging
+    log = logging.getLogger("werkzeug")
+    log.setLevel(logging.WARNING)
+
+    # 自动打开浏览器
+    threading.Thread(target=open_browser, daemon=True).start()
+
     print("[启动] 访问 http://127.0.0.1:5000")
     app.run(host="127.0.0.1", port=5000, debug=False)

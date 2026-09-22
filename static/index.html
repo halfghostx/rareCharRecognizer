@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生僻字图片识别</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    max-width: 960px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #333;
+    background: #fafafa;
+  }
+  h1 { font-weight: 500; color: #222; margin-bottom: 8px; }
+  .subtitle { color: #888; font-size: 14px; margin-bottom: 24px; }
+
+  .uploader {
+    padding: 32px 20px;
+    border: 2px dashed #c0c0c0;
+    border-radius: 12px;
+    text-align: center;
+    cursor: pointer;
+    background: #fff;
+    transition: all 0.15s;
+    color: #666;
+  }
+  .uploader:hover, .uploader.dragover {
+    border-color: #4a90d9;
+    background: #f5f9ff;
+    color: #4a90d9;
+  }
+  .uploader strong { color: inherit; }
+
+  #preview {
+    max-width: 180px;
+    max-height: 180px;
+    margin: 20px auto 0;
+    display: block;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fff;
+    padding: 8px;
+  }
+
+  #status {
+    text-align: center;
+    color: #666;
+    margin: 20px 0 8px;
+    min-height: 20px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .candidate {
+    border: 1px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 10px 8px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s;
+    background: #fff;
+  }
+  .candidate:hover {
+    border-color: #4a90d9;
+    box-shadow: 0 4px 12px rgba(74, 144, 217, 0.15);
+    transform: translateY(-2px);
+  }
+  .candidate img {
+    width: 72px;
+    height: 72px;
+    display: block;
+    margin: 0 auto;
+  }
+  .candidate .cp {
+    font-family: "Consolas", monospace;
+    color: #555;
+    font-size: 12px;
+    margin-top: 6px;
+  }
+  .candidate .score {
+    color: #aaa;
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .candidate.top1 {
+    border-color: #52c41a;
+    background: #f6ffed;
+  }
+  .candidate.top1 .cp { color: #389e0d; }
+
+  .hint {
+    text-align: center;
+    color: #aaa;
+    font-size: 12px;
+    margin-top: 20px;
+  }
+</style>
+</head>
+<body>
+
+<h1>生僻字图片识别</h1>
+<div class="subtitle">上传单字截图，匹配字形并跳转叶典网查询</div>
+
+<div class="uploader" id="uploader">
+  点击选择图片，或将图片拖拽到此处
+  <input type="file" id="fileInput" accept="image/*" hidden>
+</div>
+
+<img id="preview" hidden>
+<div id="status"></div>
+<div class="grid" id="results"></div>
+<div class="hint">点击候选卡片在新标签页打开叶典网</div>
+
+<script>
+const uploader = document.getElementById('uploader');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const results = document.getElementById('results');
+const status = document.getElementById('status');
+
+uploader.addEventListener('click', () => fileInput.click());
+uploader.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploader.classList.add('dragover');
+});
+uploader.addEventListener('dragleave', () => {
+  uploader.classList.remove('dragover');
+});
+uploader.addEventListener('drop', e => {
+  e.preventDefault();
+  uploader.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    fileInput.files = e.dataTransfer.files;
+    handleFile();
+  }
+});
+fileInput.addEventListener('change', handleFile);
+
+async function handleFile() {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  preview.src = URL.createObjectURL(file);
+  preview.hidden = false;
+  results.innerHTML = '';
+  status.textContent = '识别中…';
+
+  const form = new FormData();
+  form.append('image', file);
+
+  try {
+    const resp = await fetch('/recognize', { method: 'POST', body: form });
+    const data = await resp.json();
+    if (data.error) {
+      status.textContent = '⚠ ' + data.error;
+      return;
+    }
+    status.textContent = `共 ${data.results.length} 个候选`;
+    renderResults(data.results);
+  } catch (err) {
+    status.textContent = '请求失败: ' + err;
+  }
+}
+
+function renderResults(items) {
+  results.innerHTML = '';
+  items.forEach((r, i) => {
+    const div = document.createElement('div');
+    div.className = 'candidate' + (i === 0 ? ' top1' : '');
+    div.innerHTML = `
+      <img src="/glyph/${r.codepoint}" alt="U+${r.codepoint}">
+      <div class="cp">U+${r.codepoint}</div>
+      <div class="score">${(r.score * 100).toFixed(1)}%</div>
+    `;
+    div.onclick = () => window.open(r.yedict_url, '_blank');
+    results.appendChild(div);
+  });
+}
+</script>
+
+</body>
+</html>

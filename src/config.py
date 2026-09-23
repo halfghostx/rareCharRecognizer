@@ -61,10 +61,35 @@ FONT_SIZE = TEMPLATE_SIZE - 8
 # ============================================================
 
 PLANES = [
+    # 黑体：单文件，覆盖所有平面
     {
-        "file": "TH-Tshyn-P0.ttf",
-        "range": (0x3400, 0x4DBF),
-        "note": "扩展 A 区全量",
+        "font_file": os.path.join(BASE_DIR, "data", "fonts_hei", "TH-Hak.ttf"),
+        "range": None,
+        "note": "黑体（全平面）",
+    },
+    # 宋体 P0：基本区 + 扩展A
+    {
+        "font_file": os.path.join(BASE_DIR, "data", "fonts_song", "TH-Sung-TP0.ttf"),
+        "range": None,
+        "note": "宋体 P0",
+    },
+    # 宋体 P2：扩展B/C/D/E/F
+    {
+        "font_file": os.path.join(BASE_DIR, "data", "fonts_song", "TH-Sung-TP2.ttf"),
+        "range": None,
+        "note": "宋体 P2",
+    },
+    # 楷体 P0
+    {
+        "font_file": os.path.join(BASE_DIR, "data", "fonts_kai", "TH-Khaai-TP0.ttf"),
+        "range": None,
+        "note": "楷体 P0",
+    },
+    # 楷体 P2
+    {
+        "font_file": os.path.join(BASE_DIR, "data", "fonts_kai", "TH-Khaai-TP2.ttf"),
+        "range": None,
+        "note": "楷体 P2",
     },
 ]
 
@@ -74,7 +99,7 @@ PLANES = [
 # ============================================================
 
 TOP_K = 20
-COARSE_TOP_K = 6000
+COARSE_TOP_K = 60000
 MIN_SCORE = 0.1
 
 
@@ -100,8 +125,10 @@ if __name__ == "__main__":
     print(f"粗排 Top-K   : {COARSE_TOP_K}")
     print(f"最终 Top-K   : {TOP_K}")
     print()
-    print("启用的平面：")
+    print("启用的字体：")
     for p in PLANES:
         rng = p["range"]
         rng_str = f"0x{rng[0]:X} – 0x{rng[1]:X}" if rng else "不限"
-        print(f"  {p['file']:24s} 范围: {rng_str}  ({p.get('note', '')})")
+        path = p["font_file"]
+        exists = "✓" if os.path.exists(path) else "✗ 缺失"
+        print(f"  [{exists}] {p.get('note', ''):20s} {path}")

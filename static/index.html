@@ -32,7 +32,6 @@
     background: #f5f9ff;
     color: #4a90d9;
   }
-  .uploader strong { color: inherit; }
 
   #preview {
     max-width: 180px;
@@ -96,6 +95,23 @@
   }
   .candidate.top1 .cp { color: #389e0d; }
 
+  .toggle-btn {
+    display: block;
+    margin: 24px auto 0;
+    padding: 10px 32px;
+    border: 1px solid #4a90d9;
+    border-radius: 8px;
+    background: #fff;
+    color: #4a90d9;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .toggle-btn:hover {
+    background: #4a90d9;
+    color: #fff;
+  }
+
   .hint {
     text-align: center;
     color: #aaa;
@@ -117,6 +133,7 @@
 <img id="preview" hidden>
 <div id="status"></div>
 <div class="grid" id="results"></div>
+<button class="toggle-btn" id="toggleBtn" hidden>展开查看更多</button>
 <div class="hint">点击候选卡片在新标签页打开叶典网</div>
 
 <script>
@@ -125,6 +142,11 @@ const fileInput = document.getElementById('fileInput');
 const preview = document.getElementById('preview');
 const results = document.getElementById('results');
 const status = document.getElementById('status');
+const toggleBtn = document.getElementById('toggleBtn');
+
+const DEFAULT_SHOW = 20;   // 默认展示前 20 个
+let allResults = [];       // 后端返回的全部候选
+let isExpanded = false;    // 当前是否展开
 
 uploader.addEventListener('click', () => fileInput.click());
 uploader.addEventListener('dragover', e => {
@@ -144,6 +166,11 @@ uploader.addEventListener('drop', e => {
 });
 fileInput.addEventListener('change', handleFile);
 
+toggleBtn.addEventListener('click', () => {
+  isExpanded = !isExpanded;
+  renderVisible();
+});
+
 async function handleFile() {
   const file = fileInput.files[0];
   if (!file) return;
@@ -151,6 +178,9 @@ async function handleFile() {
   preview.src = URL.createObjectURL(file);
   preview.hidden = false;
   results.innerHTML = '';
+  toggleBtn.hidden = true;
+  allResults = [];
+  isExpanded = false;
   status.textContent = '识别中…';
 
   const form = new FormData();
@@ -163,16 +193,22 @@ async function handleFile() {
       status.textContent = '⚠ ' + data.error;
       return;
     }
-    status.textContent = `共 ${data.results.length} 个候选`;
-    renderResults(data.results);
+    allResults = data.results;
+    status.textContent = `共 ${allResults.length} 个候选`;
+    renderVisible();
   } catch (err) {
     status.textContent = '请求失败: ' + err;
   }
 }
 
-function renderResults(items) {
+function renderVisible() {
   results.innerHTML = '';
-  items.forEach((r, i) => {
+  const count = isExpanded
+    ? allResults.length
+    : Math.min(DEFAULT_SHOW, allResults.length);
+
+  for (let i = 0; i < count; i++) {
+    const r = allResults[i];
     const div = document.createElement('div');
     div.className = 'candidate' + (i === 0 ? ' top1' : '');
     div.innerHTML = `
@@ -182,7 +218,17 @@ function renderResults(items) {
     `;
     div.onclick = () => window.open(r.yedict_url, '_blank');
     results.appendChild(div);
-  });
+  }
+
+  // 控制展开按钮
+  if (allResults.length > DEFAULT_SHOW) {
+    toggleBtn.hidden = false;
+    toggleBtn.textContent = isExpanded
+      ? '收起'
+      : `展开查看更多（还有 ${allResults.length - DEFAULT_SHOW} 个）`;
+  } else {
+    toggleBtn.hidden = true;
+  }
 }
 </script>
 

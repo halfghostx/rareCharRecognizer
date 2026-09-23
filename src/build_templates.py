@@ -1,15 +1,15 @@
 # src/build_templates.py
 # -*- coding: utf-8 -*-
 """
-生成两套模板库：
-  - DINOv2 CNN 特征 (384 维) —— 用于粗排
-  - HOG 特征 (2352 维)       —— 用于精排
+多字体模板生成：
+  - 遍历 PLANES 里的每套字体
+  - 每套字体独立渲染、提取 CNN + HOG 特征
+  - 最后 vstack 合并成一套模板
 """
 
 import os
 import sys
 import time
-import random
 import numpy as np
 import cv2
 from fontTools.ttLib import TTFont
@@ -54,57 +54,36 @@ def extract_hog(gray_img):
     return feat / norm
 
 
-def load_fixed_codepoints(path):
-    cps = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                cps.append(int(line, 16))
-            except ValueError:
-                print(f"  [警告] 无法解析: {line}")
-    return cps
+def build_one_font(extractor, font_file, codepoint_range, note,
+                   template_size, font_size):
+    print(f"\n加载字体: {font_file}  [{note}]")
+    if not os.path.exists(font_file):
+        print(f"  [跳过] 文件不存在")
+        return None
 
-
-def build_plane(extractor, font_path, codepoint_range, sample_size,
-                template_size, font_size, explicit_cps=None):
-    print(f"\n加载字体: {font_path}")
-    font = TTFont(font_path)
+    font = TTFont(font_file)
     cmap = font.getBestCmap()
     print(f"  字体 cmap 包含 {len(cmap)} 个字形")
 
-    pil_font = ImageFont.truetype(font_path, font_size)
+    pil_font = ImageFont.truetype(font_file, font_size)
 
-    if explicit_cps is not None:
-        target_cps = [cp for cp in explicit_cps if cp in cmap]
-        print(f"  使用固定码点: {len(target_cps)} 个")
-    else:
-        all_cps = []
-        for cp in sorted(cmap.keys()):
-            if codepoint_range is not None:
-                lo, hi = codepoint_range
-                if not (lo <= cp <= hi):
-                    continue
-            if 0xE000 <= cp <= 0xF8FF:
+    # 收集合法码点
+    all_cps = []
+    for cp in sorted(cmap.keys()):
+        if codepoint_range is not None:
+            lo, hi = codepoint_range
+            if not (lo <= cp <= hi):
                 continue
-            if 0xF900 <= cp <= 0xFAFF:
-                continue
-            all_cps.append(cp)
-
-        print(f"  范围内合法码点: {len(all_cps)}")
-        if sample_size and sample_size < len(all_cps):
-            step = len(all_cps) / sample_size
-            indices = [int(i * step) for i in range(sample_size)]
-            target_cps = [all_cps[i] for i in indices]
-            print(f"  均匀采样: {len(target_cps)} 个")
-        else:
-            target_cps = all_cps
+        if 0xE000 <= cp <= 0xF8FF:
+            continue
+        if 0xF900 <= cp <= 0xFAFF:
+            continue
+        all_cps.append(cp)
+    print(f"  范围内合法码点: {len(all_cps)}")
 
     cnn_feats, hog_feats, codepoints = [], [], []
     t0 = time.time()
-    for i, cp in enumerate(target_cps, 1):
+    for i, cp in enumerate(all_cps, 1):
         gray = render_glyph(pil_font, chr(cp), template_size)
         if gray is None:
             continue
@@ -117,80 +96,46 @@ def build_plane(extractor, font_path, codepoint_range, sample_size,
         cnn_feats.append(cnn_feat)
         hog_feats.append(hog_feat)
         codepoints.append(cp)
-        if i % 100 == 0:
+        if i % 1000 == 0:
             elapsed = time.time() - t0
-            print(f"  处理 {i}/{len(target_cps)}  收集 {len(codepoints)}  "
-                  f"({elapsed:.1f}s)")
+            speed = elapsed / i * 1000
+            print(f"  处理 {i}/{len(all_cps)}  收集 {len(codepoints)}  "
+                  f"({elapsed:.1f}s, {speed:.1f}s/1000)")
 
     elapsed = time.time() - t0
-    print(f"  完成: 收集 {len(codepoints)} 个字形，用时 {elapsed:.1f}s")
+    print(f"  完成: {len(codepoints)} 个字形，用时 {elapsed:.1f}s")
 
     if not cnn_feats:
-        return None, None, None
+        return None
     return (np.array(cnn_feats, dtype=np.float32),
             np.array(hog_feats, dtype=np.float32),
             np.array(codepoints, dtype=np.int32))
 
 
-def save_samples_for_plane(codepoints, font_path, template_size,
-                            font_size, plane_name, n=8):
-    sample_dir = os.path.join(config.BASE_DIR, "data", "samples")
-    os.makedirs(sample_dir, exist_ok=True)
-    if len(codepoints) == 0:
-        return
-    pil_font = ImageFont.truetype(font_path, font_size)
-    idxs = random.sample(range(len(codepoints)), min(n, len(codepoints)))
-    saved = 0
-    for idx in idxs:
-        cp = int(codepoints[idx])
-        gray = render_glyph(pil_font, chr(cp), template_size)
-        if gray is None:
-            continue
-        filename = f"{plane_name}_U{cp:04X}.png"
-        Image.fromarray(gray).save(os.path.join(sample_dir, filename))
-        saved += 1
-    print(f"  已保存 {saved} 个抽检样本 ({plane_name})")
-
-
 def main():
     print("=" * 60)
-    print("生成双特征模板库（DINOv2 粗排 + HOG 精排）")
+    print("多字体模板生成（DINOv2 + HOG）")
     print("=" * 60)
-
-    explicit_cps = None
-    if os.path.exists(config.SAMPLE_CODEPOINTS_FILE):
-        explicit_cps = load_fixed_codepoints(config.SAMPLE_CODEPOINTS_FILE)
-        print(f"从文件加载固定码点: {len(explicit_cps)} 个")
-    else:
-        print("未找到固定码点文件，使用范围模式")
 
     extractor = CNNFeatureExtractor(config.CNN_MODEL_PATH)
 
     all_cnn, all_hog, all_cps = [], [], []
+
     for plane in config.PLANES:
-        font_path = os.path.join(config.FONT_DIR, plane["file"])
-        if not os.path.exists(font_path):
-            print(f"\n[跳过] 字体文件不存在: {font_path}")
-            continue
-
-        cnn_f, hog_f, cps = build_plane(
-            extractor, font_path, plane.get("range"),
-            plane.get("sample"),
-            config.TEMPLATE_SIZE, config.FONT_SIZE,
-            explicit_cps=explicit_cps,
+        result = build_one_font(
+            extractor,
+            plane["font_file"],
+            plane.get("range"),
+            plane.get("note", ""),
+            config.TEMPLATE_SIZE,
+            config.FONT_SIZE,
         )
-        if cnn_f is None:
+        if result is None:
             continue
-
+        cnn_f, hog_f, cps = result
         all_cnn.append(cnn_f)
         all_hog.append(hog_f)
         all_cps.append(cps)
-
-        plane_name = plane["file"].replace(".ttf", "")
-        save_samples_for_plane(
-            cps, font_path, config.TEMPLATE_SIZE, config.FONT_SIZE,
-            plane_name, n=8,
-        )
 
     if not all_cnn:
         print("\n[错误] 没有提取到任何字形。")
@@ -203,7 +148,8 @@ def main():
     print("\n" + "=" * 60)
     print("汇总")
     print("=" * 60)
-    print(f"总字形数     : {len(C)}")
+    print(f"总记录数     : {len(C)}（含多字体重复）")
+    print(f"唯一码点数   : {len(np.unique(C))}")
     print(f"DINOv2 特征  : {CNN_V.shape}  "
           f"{CNN_V.nbytes / 1024 / 1024:.1f} MB")
     print(f"HOG 特征     : {HOG_V.shape}  "
